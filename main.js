@@ -39,7 +39,7 @@ const GRAPH_HEIGHT = 32;
 const PLOT_DATA_POINTS = 120; // Play around with this value. It can be as high as QUEUE_SIZE
 
 // BUY SELL SETTINGS
-const BUY_SELL_STRATEGY = 6; // 3 = buy boulinger bounce, 6 is wait until min and buy bounce
+var BUY_SELL_STRATEGY = 7; // 3 = buy boulinger bounce, 6 is wait until min and buy bounce
 const TIME_BEFORE_NEW_BUY = ONE_MIN;
 var BUFFER_AFTER_FAIL = true;
 const OPPORTUNITY_EXPIRE_WINDOW = 15 * ONE_MIN;
@@ -67,7 +67,7 @@ const MIN_TREND_STDEV_MULTIPLIER = 0.2;
 const OUTLIER_STDEV_MULTIPLIER = 0.5;
 const OUTLIER_INC = 5;
 var BB_SELL = 10;
-var BB_BUY = 30;
+var BB_BUY = 15;
 
 // PRICE CHECK SETTINGS (BEFORE BUY GRAPH)
 var SYMBOLS_PRICE_CHECK_TIME = 13333; // Uniform distribution of avg 1.5x this value
@@ -76,8 +76,8 @@ const PREPUMP_STOP_LOSS_MULTIPLIER = 1;
 const CLEAR_BLACKLIST_TIME = 120 * ONE_MIN;
 const PRICES_HISTORY_LENGTH = 60; // * 1.5 * SYMBOLS_PRICE_CHECK_TIME
 const RALLY_TIME = 22; // * 1.5 * SYMBOLS_PRICE_CHECK_TIME
-const RALLY_MAX_DELTA = 1.05; // don't go for something thats too steep
-const RALLY_MIN_DELTA = 1.02;
+const RALLY_MAX_DELTA = 1.03; // don't go for something thats too steep
+const RALLY_MIN_DELTA = 1.01;
 const RALLY_GREEN_RED_RATIO = 2.5;
 
 // DONT TOUCH THESE GLOBALS
@@ -125,7 +125,7 @@ quit_buy = false;
 ////////////////////////// CODE STARTS ////////////////////////
 
 if (!process.argv[2]) {
-	console.log("Usage: node main.js COINPAIR/prepump []");
+	console.log("Usage: node main.js COINPAIR/prepump poll_interval");
 	process.exit(1);
 }
 
@@ -211,7 +211,7 @@ async function waitUntilPrepump() {
 		rally = null;
 		while (rallies.length) {
 			rally = rallies.shift();
-			if (getBalance(getCoin(rally.sym)) > 0 || blacklist.includes(getCoin(rally.sym))) {
+			if (getBalance(getCoin(rally.sym)) > 0 || blacklist.includes(getCoin(rally.sym)) && BUY_SELL_STRATEGY != 7) {
 				rally = null;
 			}
 		}
@@ -531,6 +531,15 @@ async function waitUntilTimeToBuy() {
 						}
 					}
 					break;
+				case 7:
+					if (lookback.length < BB_BUY) {
+						break;
+					}
+					if (!ready && meanTrend.includes("Up")) {
+						return latestPrice;
+					}
+					ready = true;
+					return 0;
 				default:
 					break;
 			}
@@ -562,6 +571,7 @@ async function waitUntilTimeToSell(take_profit, stop_loss, buy_price) {
 	timeBeforeSale = Date.now() + ONE_MIN; // Believe in yourself!
 	stop_loss_check = 0;
 	timeout_count = 0;
+	yolo_sell_counter = 0;
 	take_profit_check_time = 0;
 	while (!auto || (latestPrice > stop_loss || Date.now() < stop_loss_check) && (latestPrice < take_profit || !meanTrend.includes("Down"))) {
 		var [mean, stdev] = await tick(false);
@@ -617,6 +627,21 @@ async function waitUntilTimeToSell(take_profit, stop_loss, buy_price) {
 						stop_loss *= STOP_LOSS_INCREASE_PCT;
 					}
 					// do nothing for now
+					break;
+				case 7:
+					// fast buy, fast sell
+					if (meanTrend.includes("Up")) {
+						yolo_sell_counter = 0;
+						
+					} else {
+						++yolo_sell_counter;
+					}
+					if (yolo_sell_counter > 15) {
+						return latestPrice;
+					}
+					if (meanTrend.includes("Down")) {
+						return latestPrice;
+					}
 					break;
 				default:
 					// do nothing
